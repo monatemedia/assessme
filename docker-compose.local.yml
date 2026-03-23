@@ -14,7 +14,12 @@ name: assessme-local
 services:
 
   assessme-web:
-    image: ghcr.io/monatemedia/assessme:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DEV_DEPENDENCIES: "true"
+    image: ghcr.io/monatemedia/assessme:dev
     ports:
       - "8001:80"
     environment:
@@ -27,7 +32,12 @@ services:
       - assessme-local
 
   assessme-queue:
-    image: ghcr.io/monatemedia/assessme:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DEV_DEPENDENCIES: "true"
+    image: ghcr.io/monatemedia/assessme:dev
     environment:
       APP_ENV: local
       APP_DEBUG: true
@@ -36,7 +46,6 @@ services:
 
   assessme-db:
     ports:
-      # Steers clear of 5432 (XAMPP PostgreSQL on Windows host)
       - "5436:5432"
     networks:
       - assessme-local
@@ -49,6 +58,9 @@ services:
 
 networks:
   assessme-local:
+    driver: bridge
+  proxy-network:
+    external: false
     driver: bridge
 
 # Override the external proxy-network — not needed locally
