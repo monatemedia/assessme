@@ -1,0 +1,441 @@
+name: publish
+
+on:
+  push:
+    branches:
+      - "release/**"   # Staging deployment
+    tags:
+      - "v*"           # Production deployment via version tag
+  workflow_dispatch:   # Allow manual triggers
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/monatemedia/assessme
+
+jobs:
+
+  # ============================================================
+  # JOB 1: BUILD AND PUSH DOCKER IMAGE
+  # ============================================================
+  publish:
+    name: Publish Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.set-tag.outputs.tag }}
+      version-tag: ${{ steps.set-tag.outputs.version }}
+      app-url: ${{ steps.set-tag.outputs.app-url }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine image tag, environment, and APP_URL
+        id: set-tag
+        run: |
+          STAGING_URL="https://assessme.monatemedia.com"
+          PRODUCTION_URL="https://assessme.co.za"
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "tag=production" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "app-url=$PRODUCTION_URL" >> $GITHUB_OUTPUT
+            echo "📦 Building tagged release: v$VERSION"
+
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+            VERSION="${LATEST_TAG#v}"
+            echo "tag=production" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "app-url=$PRODUCTION_URL" >> $GITHUB_OUTPUT
+            echo "🚀 Building production from main: $LATEST_TAG"
+
+          elif [[ "${{ github.ref }}" == refs/heads/release/* ]]; then
+            VERSION="${GITHUB_REF#refs/heads/release/}"
+            echo "tag=staging" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "app-url=$STAGING_URL" >> $GITHUB_OUTPUT
+            echo "🧪 Building staging release: $VERSION"
+
+          else
+            VERSION="dev-$(git rev-parse --short HEAD)"
+            echo "tag=dev" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "app-url=$STAGING_URL" >> $GITHUB_OUTPUT
+            echo "🔧 Building dev: $VERSION"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        run: |
+          echo ${{ secrets.PAT }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:v${{ steps.set-tag.outputs.version }}
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
+          build-args: |
+            INSTALL_DEV_DEPENDENCIES=${{ contains(github.ref, 'refs/heads/release/') }}
+
+      - name: Output deployment info
+        run: |
+          echo "📌 Version: ${{ steps.set-tag.outputs.version }}"
+          echo "🌐 APP URL: ${{ steps.set-tag.outputs.app-url }}"
+          echo "🏷️  Image Tags:"
+          echo "   • ${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}"
+          echo "   • ${{ env.IMAGE_NAME }}:v${{ steps.set-tag.outputs.version }}"
+          echo "   • ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+
+  # ============================================================
+  # JOB 2: DEPLOY TO STAGING
+  # Triggered by push to release/* branches
+  # ============================================================
+  deploy-staging:
+    needs: publish
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/heads/release/')
+
+    env:
+      APP_URL: ${{ needs.publish.outputs.app-url }}
+      VERSION: ${{ needs.publish.outputs.version-tag }}
+      HOST: ${{ secrets.SSH_HOST }}
+      USER: ${{ secrets.SSH_USER }}
+      SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      WORK_DIR: ${{ secrets.WORK_DIR }}
+      WEB_SERVICE: assessme-web
+      QUEUE_SERVICE: assessme-queue
+      INIT_SERVICE: assessme-init
+
+    steps:
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ env.SSH_KEY }}
+
+      - name: Add Server to Known Hosts
+        run: ssh-keyscan -H ${{ env.HOST }} >> ~/.ssh/known_hosts
+
+      - name: Pull and Deploy to Staging
+        run: |
+          ssh ${{ env.USER }}@${{ env.HOST }} << 'EOF'
+
+            # Create working directory if it doesn't exist
+            if [ ! -d "${{ env.WORK_DIR }}" ]; then
+              echo "📁 Creating working directory: ${{ env.WORK_DIR }}"
+              mkdir -p ${{ env.WORK_DIR }}
+              mkdir -p ${{ env.WORK_DIR }}/storage/app/public
+              mkdir -p ${{ env.WORK_DIR }}/storage/framework/cache
+              mkdir -p ${{ env.WORK_DIR }}/storage/framework/sessions
+              mkdir -p ${{ env.WORK_DIR }}/storage/framework/views
+              mkdir -p ${{ env.WORK_DIR }}/storage/logs
+              mkdir -p ${{ env.WORK_DIR }}/bootstrap/cache
+              chmod -R 775 ${{ env.WORK_DIR }}/storage
+              chmod -R 775 ${{ env.WORK_DIR }}/bootstrap/cache
+              echo "✅ Working directory created with correct permissions."
+            fi
+
+            cd ${{ env.WORK_DIR }} || exit 1
+
+            DEPLOY_TAG=${{ needs.publish.outputs.version-tag }}
+            FULL_IMAGE_NAME="${{ env.IMAGE_NAME }}:v${DEPLOY_TAG}"
+
+            echo "📥 Pulling: ${FULL_IMAGE_NAME}"
+            docker pull ${FULL_IMAGE_NAME}
+
+            # Update IMAGE_TAG in .env
+            if grep -q "IMAGE_TAG=" .env; then
+              sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=v${DEPLOY_TAG}/" .env
+            else
+              echo "IMAGE_TAG=v${DEPLOY_TAG}" >> .env
+            fi
+            export IMAGE_TAG=v${DEPLOY_TAG}
+
+            # Run migrations via init container
+            echo "🛠️ Running migrations via assessme-init..."
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.staging.yml \
+              up -d assessme-db assessme-redis
+
+            sleep 10
+
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.staging.yml \
+              run --rm assessme-init
+
+            # Start web and queue
+            echo "🚀 Starting web and queue..."
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.staging.yml \
+              up -d ${{ env.WEB_SERVICE }} ${{ env.QUEUE_SERVICE }}
+
+            echo "⏳ Waiting for web container to boot..."
+            sleep 15
+
+            # Fix permissions
+            docker exec ${{ env.WEB_SERVICE }} chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+            docker exec ${{ env.WEB_SERVICE }} chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+
+            # Graceful queue restart
+            docker exec ${{ env.QUEUE_SERVICE }} php artisan queue:restart || true
+
+          EOF
+
+      - name: External Health Check
+        run: |
+          echo "🌐 Health check: ${{ env.APP_URL }}"
+          sleep 5
+          response=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.APP_URL }} || echo "000")
+          if [ "$response" = "200" ]; then
+            echo "✅ Health check passed (HTTP $response)"
+          else
+            echo "❌ Health check failed (HTTP $response)"
+            exit 1
+          fi
+
+      - name: Cleanup SSH Keys
+        if: always()
+        run: rm -rf ~/.ssh
+
+  # ============================================================
+  # JOB 3: DEPLOY TO PRODUCTION
+  # Triggered by push to main or version tag
+  # ============================================================
+  deploy-production:
+    needs: publish
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    environment: "production"
+    permissions:
+      contents: write
+
+    env:
+      APP_URL: ${{ needs.publish.outputs.app-url }}
+      VERSION: ${{ needs.publish.outputs.version-tag }}
+      HOST: ${{ secrets.PRODUCTION_HOST }}
+      USER: ${{ secrets.PRODUCTION_USER }}
+      SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+      WORK_DIR: ${{ secrets.PRODUCTION_WORK_DIR }}
+
+    steps:
+      - name: Checkout Application Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: app-code
+
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ env.SSH_KEY }}
+
+      - name: Add Production Server to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          for i in {1..3}; do
+            if ssh-keyscan -T 10 -H ${{ env.HOST }} >> ~/.ssh/known_hosts; then
+              echo "✅ Host key added on attempt $i."
+              exit 0
+            fi
+            echo "⚠️ Attempt $i failed. Retrying in 5 seconds..."
+            sleep 5
+          done
+          echo "🚨 ssh-keyscan failed after 3 attempts."
+          exit 1
+
+      - name: Create working directory if it does not exist
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            if [ ! -d "${{ env.WORK_DIR }}" ]; then
+              echo "📁 Creating working directory: ${{ env.WORK_DIR }}"
+              mkdir -p ${{ env.WORK_DIR }}
+              mkdir -p ${{ env.WORK_DIR }}/storage/app/public
+              mkdir -p ${{ env.WORK_DIR }}/storage/framework/cache
+              mkdir -p ${{ env.WORK_DIR }}/storage/framework/sessions
+              mkdir -p ${{ env.WORK_DIR }}/storage/framework/views
+              mkdir -p ${{ env.WORK_DIR }}/storage/logs
+              mkdir -p ${{ env.WORK_DIR }}/bootstrap/cache
+              chmod -R 775 ${{ env.WORK_DIR }}/storage
+              chmod -R 775 ${{ env.WORK_DIR }}/bootstrap/cache
+              sudo chown -R ${{ env.USER }}:${{ env.USER }} ${{ env.WORK_DIR }}
+              echo "✅ Working directory created with correct permissions."
+            else
+              echo "Working directory already exists."
+            fi
+
+      - name: Ensure proxy-network exists
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            docker network create proxy-network || true
+            echo "✅ proxy-network confirmed."
+
+      - name: Ensure Nginx Proxy stack is running
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            NGINX_PROXY_DIR="/home/${{ env.USER }}/nginx-proxy"
+            if [ -z "$(docker compose -f ${NGINX_PROXY_DIR}/docker-compose.yml ps -q)" ]; then
+              docker compose -f ${NGINX_PROXY_DIR}/docker-compose.yml up -d
+              echo "✅ Nginx Proxy stack started."
+            else
+              echo "Nginx Proxy stack already running."
+            fi
+
+      - name: Create production .env on VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            cd ${{ env.WORK_DIR }}
+            EXISTING_APP_KEY=$(grep '^APP_KEY=' .env 2>/dev/null || true)
+
+            cat << EOF > .env
+            APP_NAME=AssessMe
+            APP_ENV=production
+            APP_DEBUG=false
+            APP_URL=${{ env.APP_URL }}
+
+            DB_CONNECTION=pgsql
+            DB_HOST=assessme-db
+            DB_PORT=5432
+            DB_DATABASE=assessme_db
+            DB_USERNAME=${{ secrets.PRODUCTION_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.PRODUCTION_DB_PASSWORD }}
+
+            REDIS_HOST=assessme-redis
+            REDIS_PORT=6379
+            CACHE_DRIVER=redis
+            QUEUE_CONNECTION=redis
+            SESSION_DRIVER=redis
+
+            OPENAI_API_KEY=${{ secrets.PRODUCTION_OPENAI_API_KEY }}
+
+            MAIL_MAILER=log
+            MAIL_FROM_ADDRESS=noreply@assessme.co.za
+            MAIL_FROM_NAME=AssessMe
+
+            VIRTUAL_HOST=assessme.co.za
+            LETSENCRYPT_HOST=assessme.co.za
+
+            DOCKER_POSTGRES_PORT=${{ secrets.PRODUCTION_DOCKER_POSTGRES_PORT }}
+            DOCKER_REDIS_PORT=${{ secrets.PRODUCTION_DOCKER_REDIS_PORT }}
+            DOCKER_WEB_PORT=${{ secrets.PRODUCTION_DOCKER_WEB_PORT }}
+            EOF
+
+            if [ -n "$EXISTING_APP_KEY" ]; then
+                echo "$EXISTING_APP_KEY" >> .env
+                echo "✅ Existing APP_KEY preserved."
+            else
+                echo "APP_KEY=" >> .env
+                echo "ℹ️ APP_KEY will be generated on first boot."
+            fi
+            echo "✅ Production .env written."
+
+      - name: Set directory permissions
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            rm -f ${{ env.WORK_DIR }}/deploy-prod.sh
+            rm -f ${{ env.WORK_DIR }}/docker-entrypoint.sh
+            rm -f ${{ env.WORK_DIR }}/docker-compose.yml
+            sudo chown -R ${{ env.USER }}:${{ env.USER }} ${{ env.WORK_DIR }}
+            chmod 775 ${{ env.WORK_DIR }}
+            echo "✅ Permissions set."
+
+      - name: Transfer deployment files to VPS
+        run: |
+          scp -o StrictHostKeyChecking=no \
+              ./app-code/deploy-prod.sh \
+              ./app-code/docker-entrypoint.sh \
+              ./app-code/docker-compose.yml \
+              ${USER}@${HOST}:${WORK_DIR}/
+
+          ssh ${USER}@${HOST} "chmod +x ${WORK_DIR}/deploy-prod.sh"
+          ssh ${USER}@${HOST} "chmod +x ${WORK_DIR}/docker-entrypoint.sh"
+
+      - name: Fix storage permissions
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            chmod -R 777 ${{ env.WORK_DIR }}/storage || true
+            chmod -R 777 ${{ env.WORK_DIR }}/bootstrap/cache || true
+            echo "✅ Storage permissions fixed."
+
+      - name: Execute deployment script
+        run: |
+          ssh ${{ env.USER }}@${{ env.HOST }} \
+            'cd ${{ env.WORK_DIR }} && \
+            export WORK_DIR="${{ env.WORK_DIR }}" && \
+            export IMAGE_NAME="ghcr.io/monatemedia/assessme" && \
+            export APP_URL="${{ env.APP_URL }}" && \
+            ./deploy-prod.sh'
+
+      - name: Wait for Nginx reload
+        run: sleep 15
+
+      - name: External Health Check
+        run: |
+          sleep 5
+          response=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.APP_URL }} || echo "000")
+          if [ "$response" = "200" ]; then
+            echo "✅ Health check passed (HTTP $response)"
+          else
+            echo "❌ Health check failed (HTTP $response) at ${{ env.APP_URL }}"
+            ssh ${{ env.USER }}@${{ env.HOST }} "docker logs assessme-web --tail 50"
+            exit 1
+          fi
+
+      - name: Cleanup SSH Keys
+        if: always()
+        run: rm -rf ~/.ssh
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Deployment Info
+            - **Version**: ${{ needs.publish.outputs.version-tag }}
+            - **Environment**: Production
+            - **Deployed**: ${{ github.event.head_commit.timestamp }}
+            - **Commit**: ${{ github.sha }}
+          draft: false
+          prerelease: false

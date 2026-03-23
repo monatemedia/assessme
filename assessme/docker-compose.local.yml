@@ -1,0 +1,54 @@
+name: assessme-local
+
+# Local development overrides for Docker Desktop
+# Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# Differences from production:
+# - Uses :dev image tag
+# - APP_ENV set to local, APP_DEBUG enabled
+# - Ports mapped to local machine for direct access
+# - No proxy-network (uses its own local network)
+# - No VIRTUAL_HOST or LETSENCRYPT_HOST (no Nginx proxy locally)
+# - Postgres port steers clear of 5432 (used by XAMPP on Windows host)
+
+services:
+
+  assessme-web:
+    image: ghcr.io/monatemedia/assessme:${IMAGE_TAG:-dev}
+    ports:
+      - "8001:80"
+    environment:
+      APP_ENV: local
+      APP_DEBUG: true
+      APP_URL: http://localhost:8001
+      VIRTUAL_HOST: ""
+      LETSENCRYPT_HOST: ""
+    networks:
+      - assessme-local
+
+  assessme-queue:
+    image: ghcr.io/monatemedia/assessme:${IMAGE_TAG:-dev}
+    environment:
+      APP_ENV: local
+      APP_DEBUG: true
+    networks:
+      - assessme-local
+
+  assessme-db:
+    ports:
+      # Steers clear of 5432 (XAMPP PostgreSQL on Windows host)
+      - "5436:5432"
+    networks:
+      - assessme-local
+
+  assessme-redis:
+    ports:
+      - "6390:6379"
+    networks:
+      - assessme-local
+
+networks:
+  assessme-local:
+    driver: bridge
+
+# Override the external proxy-network — not needed locally

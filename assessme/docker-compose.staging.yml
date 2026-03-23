@@ -1,0 +1,68 @@
+name: assessme-staging
+
+# Staging overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+#
+# Differences from production:
+# - assessme-init service runs migrations before web boots
+# - APP_ENV set to staging
+# - APP_DEBUG enabled for easier QA debugging
+# - Adminer NOT included — use Tinker for DB inspection
+
+services:
+
+  assessme-init:
+    image: ghcr.io/monatemedia/assessme:${IMAGE_TAG:-staging}
+    container_name: assessme-init
+    depends_on:
+      assessme-db:
+        condition: service_healthy
+      assessme-redis:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: /bin/bash
+    command: >
+      -c "
+        php artisan migrate --force --no-interaction &&
+        echo 'Migrations complete.'
+      "
+    environment:
+      APP_ENV: staging
+      DB_CONNECTION: pgsql
+      DB_HOST: assessme-db
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: assessme-redis
+      REDIS_PORT: 6379
+    env_file:
+      - .env
+    volumes:
+      - ./.env:/var/www/html/.env
+      - ./storage:/var/www/html/storage
+      - ./bootstrap/cache:/var/www/html/bootstrap/cache
+    networks:
+      - proxy-network
+
+  assessme-web:
+    depends_on:
+      assessme-init:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: staging
+      APP_DEBUG: true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+
+  assessme-queue:
+    environment:
+      APP_ENV: staging
+      APP_DEBUG: true
+
+networks:
+  proxy-network:
+    external: true

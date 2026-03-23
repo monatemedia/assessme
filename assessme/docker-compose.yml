@@ -1,0 +1,154 @@
+name: assessme-production
+
+services:
+
+  # ----------------------------------------------
+  # WEB SERVICE
+  # ----------------------------------------------
+  assessme-web:
+    image: ghcr.io/monatemedia/assessme:${IMAGE_TAG:-production}
+    container_name: assessme-web
+    depends_on:
+      assessme-db:
+        condition: service_healthy
+      assessme-redis:
+        condition: service_healthy
+    restart: always
+    entrypoint: /usr/local/bin/docker-entrypoint.sh
+    command: apache2-foreground
+    environment:
+      APP_ENV: production
+      APP_DEBUG: false
+      APP_URL: ${APP_URL}
+      VIRTUAL_HOST: ${VIRTUAL_HOST}
+      LETSENCRYPT_HOST: ${VIRTUAL_HOST}
+      VIRTUAL_PORT: 80
+      DB_CONNECTION: pgsql
+      DB_HOST: assessme-db
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: assessme-redis
+      REDIS_PORT: 6379
+      CACHE_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+    env_file:
+      - .env
+    volumes:
+      - ./.env:/var/www/html/.env
+      - ./storage:/var/www/html/storage
+      - ./bootstrap/cache:/var/www/html/bootstrap/cache
+      - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+    networks:
+      - proxy-network
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ----------------------------------------------
+  # QUEUE WORKER
+  # Runs AI marking and plagiarism detection jobs
+  # ----------------------------------------------
+  assessme-queue:
+    image: ghcr.io/monatemedia/assessme:${IMAGE_TAG:-production}
+    container_name: assessme-queue
+    depends_on:
+      assessme-db:
+        condition: service_healthy
+      assessme-redis:
+        condition: service_healthy
+    restart: always
+    entrypoint: /usr/local/bin/docker-entrypoint.sh
+    command: php artisan queue:work redis --verbose --tries=3 --timeout=300
+    environment:
+      APP_ENV: production
+      APP_DEBUG: false
+      DB_CONNECTION: pgsql
+      DB_HOST: assessme-db
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: assessme-redis
+      REDIS_PORT: 6379
+      CACHE_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+    env_file:
+      - .env
+    volumes:
+      - ./.env:/var/www/html/.env
+      - ./storage:/var/www/html/storage
+      - ./bootstrap/cache:/var/www/html/bootstrap/cache
+      - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+    networks:
+      - proxy-network
+
+  # ----------------------------------------------
+  # POSTGRESQL DATABASE
+  # ----------------------------------------------
+  assessme-db:
+    image: postgis/postgis:18-3.6-alpine
+    container_name: assessme-db
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_DATABASE}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - assessme-db-data:/var/lib/postgresql/data
+    ports:
+      - "${DOCKER_POSTGRES_PORT:-5485}:5432"
+    networks:
+      - proxy-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------
+  # REDIS — Queue driver and cache
+  # ----------------------------------------------
+  assessme-redis:
+    image: redis:alpine
+    container_name: assessme-redis
+    restart: always
+    ports:
+      - "${DOCKER_REDIS_PORT:-6410}:6379"
+    volumes:
+      - assessme-redis-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    networks:
+      - proxy-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  assessme-db-data:
+  assessme-redis-data:
+
+networks:
+  proxy-network:
+    external: true
