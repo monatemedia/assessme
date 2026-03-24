@@ -27,7 +27,7 @@ RUN DUMP_AUTOLOAD_FLAGS="--optimize"; \
 # ============================================
 # STAGE 2: NODE BUILDER
 # ============================================
-FROM node:20-alpine AS node-builder
+FROM node:24-alpine AS node-builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm install

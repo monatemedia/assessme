@@ -2,7 +2,7 @@
 # Dedicated Vite development server for local hot module replacement
 # Only used in local development via docker-compose.local.yml
 
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 
