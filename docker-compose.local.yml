@@ -4,7 +4,9 @@ name: assessme-local
 # Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 #
 # Differences from production:
-# - Uses :dev image tag
+# - Builds image from local Dockerfile instead of pulling from GHCR
+# - Mounts source code as volume for live file changes without rebuilding
+# - Dedicated Vite container for hot module replacement (no local Node required)
 # - APP_ENV set to local, APP_DEBUG enabled
 # - Ports mapped to local machine for direct access
 # - No proxy-network (uses its own local network)
@@ -28,6 +30,11 @@ services:
       APP_URL: http://localhost:8001
       VIRTUAL_HOST: ""
       LETSENCRYPT_HOST: ""
+    volumes:
+      - .:/var/www/html
+      - /var/www/html/vendor
+      - /var/www/html/node_modules
+      - /var/www/html/public/build
     networks:
       - assessme-local
 
@@ -41,6 +48,29 @@ services:
     environment:
       APP_ENV: local
       APP_DEBUG: true
+    volumes:
+      - .:/var/www/html
+      - /var/www/html/vendor
+      - /var/www/html/node_modules
+      - /var/www/html/public/build
+    networks:
+      - assessme-local
+
+  # ----------------------------------------------
+  # VITE — Hot module replacement for local dev
+  # Watches Blade, CSS, and JS files
+  # Access HMR at http://localhost:5173
+  # ----------------------------------------------
+  assessme-vite:
+    build:
+      context: .
+      dockerfile: Dockerfile.vite
+    container_name: assessme-vite
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - /app/node_modules
     networks:
       - assessme-local
 
@@ -56,11 +86,15 @@ services:
     networks:
       - assessme-local
 
+volumes:
+  assessme-db-data:
+    name: assessme-db-data
+  assessme-redis-data:
+    name: assessme-redis-data
+
 networks:
   assessme-local:
     driver: bridge
   proxy-network:
     external: false
     driver: bridge
-
-# Override the external proxy-network — not needed locally

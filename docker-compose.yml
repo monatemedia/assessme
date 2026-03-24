@@ -147,7 +147,9 @@ services:
 
 volumes:
   assessme-db-data:
+    name: assessme-db-data
   assessme-redis-data:
+    name: assessme-redis-data
 
 networks:
   proxy-network:

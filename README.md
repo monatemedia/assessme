@@ -43,8 +43,16 @@
     </li>
     <li><a href="#getting-started">Getting Started</a>
       <ul>
-        <li><a href="#prerequisites">Prerequisites</a></li>
-        <li><a href="#local-development-docker-desktop">Local Development</a></li>
+        <li><a href="#how-it-works">How It Works</a></li>
+        <li><a href="#first-time-setup">First Time Setup</a></li>
+        <li><a href="#daily-development-commands">Daily Development Commands</a></li>
+        <li><a href="#running-artisan-commands">Running Artisan Commands</a></li>
+        <li><a href="#destroying-and-rebuilding">Destroying and Rebuilding</a></li>
+        <li><a href="#local-ports">Local Ports</a></li>
+        <li><a href="#superuser-configuration">Superuser Configuration</a></li>
+        <li><a href="#connecting-to-the-database-locally">Connecting to the Database</a></li>
+        <li><a href="#file-watching-and-hot-reload">File Watching and Hot Reload</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
       </ul>
     </li>
     <li><a href="#deployment">Deployment</a>
@@ -107,69 +115,350 @@ AssessMe solves this by treating AI usage as an informational metric — a perce
 
 ## Getting Started
 
-### Prerequisites
+> [!NOTE]
+> AssessMe is **completely self-contained**. The only external dependency is [Docker Desktop](https://www.docker.com/products/docker-desktop/). No local PHP, Node.js, Composer, PostgreSQL, or Redis installation is required.
 
-- Docker Desktop installed and running
-- Git
-- A GitHub account with access to `monatemedia/assessme`
-- An OpenAI API key with GPT-4o access
+### How It Works
 
-### Local Development (Docker Desktop)
+The local stack runs five containers:
 
-1. Clone the repository:
+```
+docker-compose.yml + docker-compose.local.yml
+│
+├── assessme-web      Laravel 13 + Filament 5 (Apache, PHP 8.3)
+├── assessme-queue    Queue worker — processes AI marking jobs
+├── assessme-vite     Vite dev server — hot module replacement
+├── assessme-db       PostgreSQL 18 (postgis/postgis:18-3.6-alpine)
+└── assessme-redis    Redis — queue driver and cache
+```
+
+On every boot, `docker-entrypoint.sh` automatically:
+1. Waits for PostgreSQL and Redis to be ready
+2. Clears and rebuilds all Laravel caches
+3. Runs `php artisan migrate --force` — safe to run repeatedly, skips already-applied migrations
+4. Creates the superuser if no users exist (credentials from `.env`)
+5. Starts Apache
+
+**You never need to run migrations or create users manually.**
+
+---
+
+### First Time Setup
+
+**Step 1 — Clone the repository**
 
 ```bash
 git clone https://github.com/monatemedia/assessme.git
 cd assessme
 ```
 
-2. Copy the local environment file:
+**Step 2 — Create your local environment file**
 
 ```bash
 cp .env.local .env
 ```
 
-3. Add your OpenAI API key to `.env`:
+**Step 3 — Add your OpenAI API key to `.env`**
 
 ```env
 OPENAI_API_KEY=your-key-here
 ```
 
-4. Start the local stack:
+> [!TIP]
+> All other values in `.env.local` are pre-configured for local Docker development. You do not need to change anything else to get started.
+
+**Step 4 — Build and start the stack**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+```
+
+The `--build` flag is only needed on first run or after `Dockerfile` changes. Subsequent starts do not need it.
+
+**Step 5 — Open the app**
+
+| URL | Description |
+|---|---|
+| `http://localhost:8001` | Cover page |
+| `http://localhost:8001/admin/login` | Examiner dashboard login |
+| `http://localhost:5173` | Vite HMR dev server |
+
+**Step 6 — Log in**
+
+| Field | Value |
+|---|---|
+| Email | `admin@assessme.local` |
+| Password | `password` |
+
+> [!WARNING]
+> These are local development credentials only. Never use them in staging or production.
+
+---
+
+### Daily Development Commands
+
+**Start the stack**
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 ```
 
-5. The app is available at `http://localhost:8001`
-
-6. Run migrations on first run:
+**Stop the stack (preserves data)**
 
 ```bash
-docker exec assessme-web php artisan migrate
+docker compose -f docker-compose.yml -f docker-compose.local.yml down
 ```
 
-7. Create a superuser via Tinker:
+**Restart a single container**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml restart assessme-web
+```
+
+**View logs**
+
+```bash
+# All containers
+docker compose -f docker-compose.yml -f docker-compose.local.yml logs
+
+# Single container, follow mode
+docker logs -f assessme-web
+docker logs -f assessme-queue
+docker logs -f assessme-vite
+```
+
+**Check container status**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml ps
+```
+
+---
+
+### Running Artisan Commands
+
+All Artisan commands run inside the `assessme-web` container:
+
+```bash
+# Open an interactive shell inside the container
+docker exec -it assessme-web bash
+
+# Or run a single command directly
+docker exec assessme-web php artisan <command>
+```
+
+**Common commands:**
+
+```bash
+# Run migrations manually
+docker exec assessme-web php artisan migrate
+
+# Roll back last migration
+docker exec assessme-web php artisan migrate:rollback
+
+# Fresh migration with seeders
+docker exec assessme-web php artisan migrate:fresh --seed
+
+# Clear all caches
+docker exec assessme-web php artisan optimize:clear
+
+# Open Tinker (interactive Laravel console)
+docker exec -it assessme-web php artisan tinker
+
+# List all routes
+docker exec assessme-web php artisan route:list
+```
+
+> [!NOTE]
+> On Windows with Git Bash, prefix commands with `winpty` if you get path errors:
+> `winpty docker exec -it assessme-web php artisan tinker`
+> Alternatively, run commands from WSL to avoid Git Bash path translation issues.
+
+---
+
+### Destroying and Rebuilding
+
+**Stop and remove containers but keep data volumes**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml down
+```
+
+**Stop and remove containers AND data volumes (full reset)**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
+```
+
+> [!DANGER]
+> The `-v` flag permanently deletes the PostgreSQL and Redis data volumes. All database data will be lost. On next `up`, migrations and the superuser seeder will run fresh automatically.
+
+**Rebuild the image after Dockerfile changes**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+```
+
+**Nuclear option — remove everything Docker-related on your machine**
+
+```bash
+# Removes all stopped containers, unused images, networks, and build cache
+# This can reclaim several GB of disk space
+docker system prune -af --volumes
+```
+
+> [!WARNING]
+> `docker system prune -af --volumes` removes ALL unused Docker resources across ALL projects on your machine, not just AssessMe. Make sure other projects are running before executing this if you want to preserve their volumes.
+
+---
+
+### Local Ports
+
+| Service | Host Port | Internal Port | Note |
+|---|---|---|---|
+| Web (Apache) | `8001` | `80` | `http://localhost:8001` |
+| Vite HMR | `5173` | `5173` | Hot module replacement |
+| PostgreSQL | `5436` | `5432` | Avoids XAMPP's `5432` on Windows |
+| Redis | `6390` | `6379` | |
+
+---
+
+### Superuser Configuration
+
+The superuser is created automatically on first boot if no users exist. Configure credentials in `.env`:
+
+```env
+SUPERUSER_NAME=Admin
+SUPERUSER_EMAIL=admin@assessme.local
+SUPERUSER_PASSWORD=password
+```
+
+The seeder is **idempotent** — if a user already exists, it skips creation silently. To reset the superuser, either use Tinker or do a full volume reset (`down -v`).
+
+**Change superuser details via Tinker:**
 
 ```bash
 docker exec -it assessme-web php artisan tinker
 ```
 
 ```php
-\App\Models\User::create([
-    'name' => 'Admin',
-    'email' => 'admin@example.com',
-    'password' => bcrypt('password'),
-    'role' => 'superuser'
+$user = \App\Models\User::first();
+$user->update([
+    'name'     => 'New Name',
+    'email'    => 'new@email.com',
+    'password' => bcrypt('new-password'),
 ]);
 ```
 
-#### Test Credentials
+---
 
-| Attribute | Value | Note |
-|---|---|---|
-| **Email** | `admin@example.com` | Local development only |
-| **Password** | `password` | Never use in staging or production |
+### Connecting to the Database Locally
+
+The PostgreSQL database is exposed on port `5436`. Connect with any PostgreSQL client (TablePlus, DBeaver, pgAdmin):
+
+| Field | Value |
+|---|---|
+| Host | `localhost` |
+| Port | `5436` |
+| Database | `assessme_db` |
+| Username | `assessme_user` |
+| Password | `secret` |
+
+> [!NOTE]
+> Port `5436` is intentional — it avoids conflicting with a local PostgreSQL installation (e.g. XAMPP) which typically runs on `5432`.
+
+---
+
+### File Watching and Hot Reload
+
+Source code is volume-mounted into the container — file changes on your host are instantly reflected without rebuilding the image.
+
+The `assessme-vite` container runs `npm run dev` automatically and watches:
+- `resources/css/` — CSS changes
+- `resources/js/` — JavaScript changes
+- `resources/views/` — Blade template changes (triggers full reload)
+
+Changes to PHP files (controllers, models, routes) are picked up immediately by Apache without any restart needed.
+
+> [!TIP]
+> If hot reload stops working, restart the Vite container:
+> ```bash
+> docker compose -f docker-compose.yml -f docker-compose.local.yml restart assessme-vite
+> ```
+
+---
+
+### Troubleshooting
+
+<details>
+<summary><strong>Container stuck and won't stop</strong></summary>
+
+This can happen on Docker Desktop for Windows. Force remove the container:
+
+```bash
+docker rm -f assessme-web
+```
+
+If that fails, restart Docker Desktop from the system tray, then bring the stack back up.
+
+</details>
+
+<details>
+<summary><strong>Permission denied on storage or bootstrap/cache</strong></summary>
+
+The volume mount can cause ownership issues on Windows. Fix permissions inside the container from WSL:
+
+```bash
+docker exec assessme-web chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+docker exec assessme-web chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+```
+
+</details>
+
+<details>
+<summary><strong>Login not working after a restart</strong></summary>
+
+Data volumes are pinned by name (`assessme-db-data`, `assessme-redis-data`) and persist across restarts. Check logs to confirm migrations and superuser seeder ran:
+
+```bash
+docker logs assessme-web | grep -E "Migration|Superuser|error"
+```
+
+If the volume was deleted (e.g. after `down -v`), migrations and superuser creation run automatically on next boot.
+
+</details>
+
+<details>
+<summary><strong>VIRTUAL_HOST warning on every command</strong></summary>
+
+```
+level=warning msg="The \"VIRTUAL_HOST\" variable is not set. Defaulting to a blank string."
+```
+
+This warning is harmless. `VIRTUAL_HOST` is used by the Nginx proxy on the VPS and is intentionally empty in local development.
+
+</details>
+
+<details>
+<summary><strong>Vite not reflecting changes</strong></summary>
+
+1. Check Vite is running: `docker logs assessme-vite`
+2. Ensure your Blade templates include the Vite directive: `@vite(['resources/css/app.css', 'resources/js/app.js'])`
+3. Restart Vite: `docker compose -f docker-compose.yml -f docker-compose.local.yml restart assessme-vite`
+
+</details>
+
+<details>
+<summary><strong>npm or Node commands needed inside the container</strong></summary>
+
+The `assessme-web` container (Apache/PHP) does not include Node or npm. Run Node commands in the dedicated Vite container:
+
+```bash
+docker exec -it assessme-vite sh
+npm install some-package
+```
+
+</details>
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

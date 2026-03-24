@@ -78,6 +78,16 @@ php artisan filament:optimize
 # Create storage symlink
 php artisan storage:link
 
+# --- 5. Run migrations ---
+echo "Running database migrations..."
+php artisan migrate --force --no-interaction
+echo "Migrations complete."
+
+# --- 6. Seed superuser if no users exist ---
+echo "Checking for superuser..."
+php artisan db:seed --class=SuperuserSeeder --force --no-interaction
+echo "Superuser check complete."
+
 echo "AssessMe setup complete. Starting server..."
 
 # Execute the command passed by docker compose (apache2-foreground or queue:work)

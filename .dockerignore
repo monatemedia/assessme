@@ -18,3 +18,4 @@ tests
 phpunit.xml
 docker-compose*.yml
 Dockerfile
+public/storage
