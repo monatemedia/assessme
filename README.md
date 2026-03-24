@@ -290,7 +290,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml down
 docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
 ```
 
-> [!DANGER]
+> [!WARNING]
 > The `-v` flag permanently deletes the PostgreSQL and Redis data volumes. All database data will be lost. On next `up`, migrations and the superuser seeder will run fresh automatically.
 
 **Rebuild the image after Dockerfile changes**
