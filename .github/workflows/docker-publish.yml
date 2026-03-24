@@ -3,17 +3,16 @@ name: publish
 on:
   push:
     branches:
-      - "release/**"   # Staging deployment
+      - "release/**" # Staging deployment
     tags:
-      - "v*"           # Production deployment via version tag
-  workflow_dispatch:   # Allow manual triggers
+      - "v*" # Production deployment via version tag
+  workflow_dispatch: # Allow manual triggers
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/monatemedia/assessme
 
 jobs:
-
   # ============================================================
   # JOB 1: BUILD AND PUSH DOCKER IMAGE
   # ============================================================
@@ -110,13 +109,12 @@ jobs:
     env:
       APP_URL: ${{ needs.publish.outputs.app-url }}
       VERSION: ${{ needs.publish.outputs.version-tag }}
-      HOST: ${{ secrets.SSH_HOST }}
-      USER: ${{ secrets.SSH_USER }}
-      SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-      WORK_DIR: ${{ secrets.WORK_DIR }}
+      HOST: ${{ secrets.STAGING_SSH_HOST }}
+      USER: ${{ secrets.STAGING_SSH_USER }}
+      SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+      WORK_DIR: ${{ secrets.STAGING_WORK_DIR }}
       WEB_SERVICE: assessme-web
       QUEUE_SERVICE: assessme-queue
-      INIT_SERVICE: assessme-init
 
     steps:
       - name: Setup SSH Agent
@@ -127,14 +125,72 @@ jobs:
       - name: Add Server to Known Hosts
         run: ssh-keyscan -H ${{ env.HOST }} >> ~/.ssh/known_hosts
 
-      - name: Pull and Deploy to Staging
-        run: |
-          ssh ${{ env.USER }}@${{ env.HOST }} << 'EOF'
+      - name: Create .env on staging server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            mkdir -p ${{ env.WORK_DIR }}
+            cd ${{ env.WORK_DIR }}
+            EXISTING_APP_KEY=$(grep '^APP_KEY=' .env 2>/dev/null || true)
 
-            # Create working directory if it doesn't exist
-            if [ ! -d "${{ env.WORK_DIR }}" ]; then
-              echo "📁 Creating working directory: ${{ env.WORK_DIR }}"
-              mkdir -p ${{ env.WORK_DIR }}
+            cat << EOF > .env
+            APP_NAME=AssessMe
+            APP_ENV=staging
+            APP_DEBUG=true
+            APP_URL=${{ secrets.STAGING_APP_URL }}
+
+            SUPERUSER_NAME=${{ secrets.STAGING_SUPERUSER_NAME }}
+            SUPERUSER_EMAIL=${{ secrets.STAGING_SUPERUSER_EMAIL }}
+            SUPERUSER_PASSWORD=${{ secrets.STAGING_SUPERUSER_PASSWORD }}
+
+            DB_CONNECTION=pgsql
+            DB_HOST=assessme-db
+            DB_PORT=5432
+            DB_DATABASE=assessme_db
+            DB_USERNAME=${{ secrets.STAGING_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.STAGING_DB_PASSWORD }}
+
+            REDIS_HOST=assessme-redis
+            REDIS_PORT=6379
+            CACHE_DRIVER=redis
+            QUEUE_CONNECTION=redis
+            SESSION_DRIVER=redis
+
+            OPENAI_API_KEY=${{ secrets.STAGING_OPENAI_API_KEY }}
+
+            MAIL_MAILER=log
+            MAIL_FROM_ADDRESS=${{ secrets.STAGING_MAIL_FROM_ADDRESS }}
+            MAIL_FROM_NAME=AssessMe
+
+            VIRTUAL_HOST=${{ secrets.STAGING_APP_URL }}
+            LETSENCRYPT_HOST=${{ secrets.STAGING_APP_URL }}
+
+            DOCKER_WEB_PORT=${{ secrets.STAGING_DOCKER_WEB_PORT }}
+            DOCKER_POSTGRES_PORT=${{ secrets.STAGING_DOCKER_POSTGRES_PORT }}
+            DOCKER_REDIS_PORT=${{ secrets.STAGING_DOCKER_REDIS_PORT }}
+            EOF
+
+            if [ -n "$EXISTING_APP_KEY" ]; then
+                echo "$EXISTING_APP_KEY" >> .env
+                echo "✅ Existing APP_KEY preserved."
+            else
+                echo "APP_KEY=" >> .env
+                echo "ℹ️ APP_KEY will be generated on first boot."
+            fi
+            echo "✅ Staging .env written."
+
+      - name: Pull and Deploy to Staging
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            # Create working directory structure if it doesn't exist
+            if [ ! -d "${{ env.WORK_DIR }}/storage" ]; then
               mkdir -p ${{ env.WORK_DIR }}/storage/app/public
               mkdir -p ${{ env.WORK_DIR }}/storage/framework/cache
               mkdir -p ${{ env.WORK_DIR }}/storage/framework/sessions
@@ -143,13 +199,13 @@ jobs:
               mkdir -p ${{ env.WORK_DIR }}/bootstrap/cache
               chmod -R 775 ${{ env.WORK_DIR }}/storage
               chmod -R 775 ${{ env.WORK_DIR }}/bootstrap/cache
-              echo "✅ Working directory created with correct permissions."
+              echo "✅ Storage directories created."
             fi
 
-            cd ${{ env.WORK_DIR }} || exit 1
+            cd ${{ env.WORK_DIR }}
 
             DEPLOY_TAG=${{ needs.publish.outputs.version-tag }}
-            FULL_IMAGE_NAME="${{ env.IMAGE_NAME }}:v${DEPLOY_TAG}"
+            FULL_IMAGE_NAME="ghcr.io/monatemedia/assessme:v${DEPLOY_TAG}"
 
             echo "📥 Pulling: ${FULL_IMAGE_NAME}"
             docker pull ${FULL_IMAGE_NAME}
@@ -160,46 +216,42 @@ jobs:
             else
               echo "IMAGE_TAG=v${DEPLOY_TAG}" >> .env
             fi
-            export IMAGE_TAG=v${DEPLOY_TAG}
 
-            # Run migrations via init container
-            echo "🛠️ Running migrations via assessme-init..."
-            docker compose \
-              -f docker-compose.yml \
-              -f docker-compose.staging.yml \
-              up -d assessme-db assessme-redis
+            # Ensure proxy-network exists
+            docker network create proxy-network || true
 
+            # Ensure Nginx proxy is running
+            NGINX_PROXY_DIR="/home/${{ env.USER }}/nginx-proxy"
+            if [ -z "$(docker compose -f ${NGINX_PROXY_DIR}/docker-compose.yml ps -q 2>/dev/null)" ]; then
+              docker compose -f ${NGINX_PROXY_DIR}/docker-compose.yml up -d
+              echo "✅ Nginx Proxy stack started."
+            fi
+
+            # Start DB and Redis first
+            docker compose up -d assessme-db assessme-redis
             sleep 10
 
-            docker compose \
-              -f docker-compose.yml \
-              -f docker-compose.staging.yml \
-              run --rm assessme-init
-
-            # Start web and queue
+            # Start web and queue (entrypoint runs migrations + superuser seeder automatically)
             echo "🚀 Starting web and queue..."
-            docker compose \
-              -f docker-compose.yml \
-              -f docker-compose.staging.yml \
-              up -d ${{ env.WEB_SERVICE }} ${{ env.QUEUE_SERVICE }}
+            docker compose up -d ${{ env.WEB_SERVICE }} ${{ env.QUEUE_SERVICE }}
 
             echo "⏳ Waiting for web container to boot..."
-            sleep 15
+            sleep 20
 
             # Fix permissions
-            docker exec ${{ env.WEB_SERVICE }} chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
-            docker exec ${{ env.WEB_SERVICE }} chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+            docker exec ${{ env.WEB_SERVICE }} chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache || true
+            docker exec ${{ env.WEB_SERVICE }} chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache || true
 
             # Graceful queue restart
             docker exec ${{ env.QUEUE_SERVICE }} php artisan queue:restart || true
 
-          EOF
+            echo "✅ Staging deployment complete."
 
       - name: External Health Check
         run: |
-          echo "🌐 Health check: ${{ env.APP_URL }}"
+          echo "🌐 Health check: ${{ secrets.STAGING_APP_URL }}"
           sleep 5
-          response=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.APP_URL }} || echo "000")
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.STAGING_APP_URL }} || echo "000")
           if [ "$response" = "200" ]; then
             echo "✅ Health check passed (HTTP $response)"
           else
@@ -227,8 +279,8 @@ jobs:
     env:
       APP_URL: ${{ needs.publish.outputs.app-url }}
       VERSION: ${{ needs.publish.outputs.version-tag }}
-      HOST: ${{ secrets.PRODUCTION_HOST }}
-      USER: ${{ secrets.PRODUCTION_USER }}
+      HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+      USER: ${{ secrets.PRODUCTION_SSH_USER }}
       SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
       WORK_DIR: ${{ secrets.PRODUCTION_WORK_DIR }}
 
@@ -321,7 +373,11 @@ jobs:
             APP_NAME=AssessMe
             APP_ENV=production
             APP_DEBUG=false
-            APP_URL=${{ env.APP_URL }}
+            APP_URL=${{ secrets.PRODUCTION_APP_URL }}
+
+            SUPERUSER_NAME=${{ secrets.PRODUCTION_SUPERUSER_NAME }}
+            SUPERUSER_EMAIL=${{ secrets.PRODUCTION_SUPERUSER_EMAIL }}
+            SUPERUSER_PASSWORD=${{ secrets.PRODUCTION_SUPERUSER_PASSWORD }}
 
             DB_CONNECTION=pgsql
             DB_HOST=assessme-db
@@ -339,15 +395,15 @@ jobs:
             OPENAI_API_KEY=${{ secrets.PRODUCTION_OPENAI_API_KEY }}
 
             MAIL_MAILER=log
-            MAIL_FROM_ADDRESS=noreply@assessme.co.za
+            MAIL_FROM_ADDRESS=${{ secrets.PRODUCTION_MAIL_FROM_ADDRESS }}
             MAIL_FROM_NAME=AssessMe
 
-            VIRTUAL_HOST=assessme.co.za
-            LETSENCRYPT_HOST=assessme.co.za
+            VIRTUAL_HOST=${{ secrets.PRODUCTION_APP_URL }}
+            LETSENCRYPT_HOST=${{ secrets.PRODUCTION_APP_URL }}
 
+            DOCKER_WEB_PORT=${{ secrets.PRODUCTION_DOCKER_WEB_PORT }}
             DOCKER_POSTGRES_PORT=${{ secrets.PRODUCTION_DOCKER_POSTGRES_PORT }}
             DOCKER_REDIS_PORT=${{ secrets.PRODUCTION_DOCKER_REDIS_PORT }}
-            DOCKER_WEB_PORT=${{ secrets.PRODUCTION_DOCKER_WEB_PORT }}
             EOF
 
             if [ -n "$EXISTING_APP_KEY" ]; then
@@ -401,7 +457,7 @@ jobs:
             'cd ${{ env.WORK_DIR }} && \
             export WORK_DIR="${{ env.WORK_DIR }}" && \
             export IMAGE_NAME="ghcr.io/monatemedia/assessme" && \
-            export APP_URL="${{ env.APP_URL }}" && \
+            export APP_URL="${{ secrets.PRODUCTION_APP_URL }}" && \
             ./deploy-prod.sh'
 
       - name: Wait for Nginx reload
@@ -410,11 +466,11 @@ jobs:
       - name: External Health Check
         run: |
           sleep 5
-          response=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.APP_URL }} || echo "000")
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ secrets.PRODUCTION_APP_URL }} || echo "000")
           if [ "$response" = "200" ]; then
             echo "✅ Health check passed (HTTP $response)"
           else
-            echo "❌ Health check failed (HTTP $response) at ${{ env.APP_URL }}"
+            echo "❌ Health check failed (HTTP $response) at ${{ secrets.PRODUCTION_APP_URL }}"
             ssh ${{ env.USER }}@${{ env.HOST }} "docker logs assessme-web --tail 50"
             exit 1
           fi

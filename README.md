@@ -466,6 +466,22 @@ npm install some-package
 
 ## Deployment
 
+### DNS Setup
+
+Before deploying, point your domain or subdomain to your VPS by adding an `A` record in your DNS/Nameserver settings (e.g. Cloudflare):
+
+| Type | Name | Points to | TTL | Description |
+|---|---|---|---|---|
+| `A` | `assessme` | `12.34.567.890` | `14400` | Subdomain — use your app name and VPS IP |
+| `A` | `@` | `12.34.567.890` | `14400` | Root domain — use `@` and your VPS IP |
+
+> [!NOTE]
+> If you mapped the application as a subdomain (e.g. `assessme.monatemedia.com`), check back after a few minutes and you should see the Nginx `403 Forbidden` message. This confirms Nginx is receiving the request but doesn't yet know how to route it — which is correct at this stage. See [docker-engine-on-linux](https://github.com/monatemedia/docker-engine-on-linux) to get Nginx set up on your VPS.
+>
+> If you mapped the application as a root domain (e.g. `assessme.co.za`) and have just purchased the domain, DNS propagation can take between a few minutes and 48 hours to be consistent everywhere.
+
+---
+
 ### Environments
 
 | Environment | URL | Trigger |
@@ -485,11 +501,19 @@ Configure these in your GitHub repository under **Settings > Secrets and variabl
 
 | Secret | Description | Example |
 |---|---|---|
-| `PAT` | GitHub Personal Access Token (GHCR push) | `ghp_xxxxxxxxxxxx` |
-| `SSH_HOST` | VPS IP address | `82.29.190.105` |
-| `SSH_USER` | SSH username | `edward` |
-| `SSH_PRIVATE_KEY` | SSH private key for VPS | `-----BEGIN OPENSSH PRIVATE KEY-----` |
-| `WORK_DIR` | Project directory on VPS | `/home/edward/assessme` |
+| `PAT` | GitHub Personal Access Token (GHCR push) — shared across environments | `ghp_xxxxxxxxxxxx` |
+| `STAGING_SSH_HOST` | Staging server IP | `12.34.567.890` |
+| `STAGING_SSH_USER` | SSH username | `edward` |
+| `STAGING_SSH_KEY` | SSH private key for staging server | `-----BEGIN OPENSSH PRIVATE KEY-----` |
+| `STAGING_WORK_DIR` | Project directory on staging server | `/home/edward/assessme-staging` |
+| `STAGING_SUPERUSER_NAME` | Superuser name for first login | `Your Name` |
+| `STAGING_SUPERUSER_EMAIL` | Superuser email for first login | `email@domain.com` |
+| `STAGING_SUPERUSER_PASSWORD` | Superuser password for first login | `SuperSecretPassword` |
+| `STAGING_APP_URL` | Staging app URL | `assessme.monatemedia.com` |
+| `STAGING_MAIL_FROM_ADDRESS` | Staging mail from address | `noreply@domain.com` |
+| `STAGING_DB_USERNAME` | PostgreSQL username | `assessme_user` |
+| `STAGING_DB_PASSWORD` | PostgreSQL password | `a-strong-password` |
+| `STAGING_OPENAI_API_KEY` | OpenAI API key | `sk-xxxxxxxxxxxx` |
 | `STAGING_DOCKER_WEB_PORT` | Host port for web container | `8250` |
 | `STAGING_DOCKER_POSTGRES_PORT` | Host port for PostgreSQL | `5475` |
 | `STAGING_DOCKER_REDIS_PORT` | Host port for Redis | `6400` |
@@ -498,10 +522,15 @@ Configure these in your GitHub repository under **Settings > Secrets and variabl
 
 | Secret | Description | Example |
 |---|---|---|
+| `PRODUCTION_SSH_HOST` | Production server IP | `12.34.567.890` |
+| `PRODUCTION_SSH_USER` | SSH username | `edward` |
 | `PRODUCTION_SSH_KEY` | SSH private key for production server | `-----BEGIN OPENSSH PRIVATE KEY-----` |
-| `PRODUCTION_HOST` | Production server IP | `82.29.190.105` |
-| `PRODUCTION_USER` | SSH username | `edward` |
 | `PRODUCTION_WORK_DIR` | Project directory on production server | `/home/edward/assessme` |
+| `PRODUCTION_SUPERUSER_NAME` | Superuser name for first login | `Your Name` |
+| `PRODUCTION_SUPERUSER_EMAIL` | Superuser email for first login | `email@domain.com` |
+| `PRODUCTION_SUPERUSER_PASSWORD` | Superuser password for first login | `SuperSecretPassword` |
+| `PRODUCTION_APP_URL` | Production app URL | `assessme.co.za` |
+| `PRODUCTION_MAIL_FROM_ADDRESS` | Production mail from address | `noreply@domain.com` |
 | `PRODUCTION_DB_USERNAME` | PostgreSQL username | `assessme_user` |
 | `PRODUCTION_DB_PASSWORD` | PostgreSQL password | `a-strong-password` |
 | `PRODUCTION_OPENAI_API_KEY` | OpenAI API key | `sk-xxxxxxxxxxxx` |
