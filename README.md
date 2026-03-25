@@ -79,7 +79,7 @@
 
 ## About The Project
 
-[![Product Screenshot][product-screenshot]](https://assessme.co.za)
+[![Product Screenshot][product-screenshot]](https://assessme.monatemedia.com)
 
 AssessMe was born from a real problem encountered during a job application process: AI plagiarism detection tools produce binary pass/fail outcomes that penalise candidates who use AI responsibly as a thinking tool, rather than measuring the depth of understanding behind their answers.
 
