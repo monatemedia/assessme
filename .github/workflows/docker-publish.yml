@@ -117,13 +117,21 @@ jobs:
       QUEUE_SERVICE: assessme-queue
 
     steps:
+      - name: Checkout Application Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: app-code
+
       - name: Setup SSH Agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ env.SSH_KEY }}
 
       - name: Add Server to Known Hosts
-        run: ssh-keyscan -H ${{ env.HOST }} >> ~/.ssh/known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ env.HOST }} >> ~/.ssh/known_hosts
 
       - name: Create .env on staging server
         uses: appleboy/ssh-action@master
@@ -182,6 +190,29 @@ jobs:
             fi
             echo "✅ Staging .env written."
 
+      - name: Set directory permissions for SCP
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            mkdir -p ${{ env.WORK_DIR }}
+            rm -f ${{ env.WORK_DIR }}/docker-compose.yml
+            rm -f ${{ env.WORK_DIR }}/docker-entrypoint.sh
+            sudo chown -R ${{ env.USER }}:${{ env.USER }} ${{ env.WORK_DIR }}
+            chmod 775 ${{ env.WORK_DIR }}
+            echo "✅ Permissions set for SCP."
+
+      - name: Transfer deployment files to staging server
+        run: |
+          scp -o StrictHostKeyChecking=no \
+              ./app-code/docker-compose.yml \
+              ./app-code/docker-entrypoint.sh \
+              ${{ env.USER }}@${{ env.HOST }}:${{ env.WORK_DIR }}/
+          ssh ${{ env.USER }}@${{ env.HOST }} "chmod +x ${{ env.WORK_DIR }}/docker-entrypoint.sh"
+          echo "✅ Deployment files transferred."
+
       - name: Pull and Deploy to Staging
         uses: appleboy/ssh-action@master
         with:
@@ -229,14 +260,14 @@ jobs:
 
             # Start DB and Redis first
             docker compose up -d assessme-db assessme-redis
-            sleep 10
+            sleep 15
 
             # Start web and queue (entrypoint runs migrations + superuser seeder automatically)
             echo "🚀 Starting web and queue..."
             docker compose up -d ${{ env.WEB_SERVICE }} ${{ env.QUEUE_SERVICE }}
 
             echo "⏳ Waiting for web container to boot..."
-            sleep 20
+            sleep 30
 
             # Fix permissions
             docker exec ${{ env.WEB_SERVICE }} chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache || true
