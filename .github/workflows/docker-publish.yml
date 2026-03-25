@@ -147,6 +147,7 @@ jobs:
             cat << EOF > .env
             APP_NAME=AssessMe
             APP_ENV=staging
+            APP_KEY=${{ secrets.STAGING_APP_KEY }}
             APP_DEBUG=true
             APP_URL=${{ secrets.STAGING_APP_URL }}
 
@@ -403,6 +404,7 @@ jobs:
             cat << EOF > .env
             APP_NAME=AssessMe
             APP_ENV=production
+            APP_KEY=${{ secrets.PRODUCTION_APP_KEY }}
             APP_DEBUG=false
             APP_URL=${{ secrets.PRODUCTION_APP_URL }}
 

@@ -506,6 +506,7 @@ Configure these in your GitHub repository under **Settings > Secrets and variabl
 | `STAGING_SSH_USER` | SSH username | `edward` |
 | `STAGING_SSH_KEY` | SSH private key for staging server | `-----BEGIN OPENSSH PRIVATE KEY-----` |
 | `STAGING_WORK_DIR` | Project directory on staging server | `/home/edward/assessme-staging` |
+| `STAGING_APP_KEY` | Run `docker exec assessme-web php artisan key:generate --show` on local machine to generate key | `base64:YOUR_GENERATED_KEY` |
 | `STAGING_SUPERUSER_NAME` | Superuser name for first login | `Your Name` |
 | `STAGING_SUPERUSER_EMAIL` | Superuser email for first login | `email@domain.com` |
 | `STAGING_SUPERUSER_PASSWORD` | Superuser password for first login | `SuperSecretPassword` |
@@ -526,6 +527,7 @@ Configure these in your GitHub repository under **Settings > Secrets and variabl
 | `PRODUCTION_SSH_USER` | SSH username | `edward` |
 | `PRODUCTION_SSH_KEY` | SSH private key for production server | `-----BEGIN OPENSSH PRIVATE KEY-----` |
 | `PRODUCTION_WORK_DIR` | Project directory on production server | `/home/edward/assessme` |
+| `PRODUCTION_APP_KEY` | Run `docker exec assessme-web php artisan key:generate --show` on local machine to generate key | `base64:YOUR_GENERATED_KEY` |
 | `PRODUCTION_SUPERUSER_NAME` | Superuser name for first login | `Your Name` |
 | `PRODUCTION_SUPERUSER_EMAIL` | Superuser email for first login | `email@domain.com` |
 | `PRODUCTION_SUPERUSER_PASSWORD` | Superuser password for first login | `SuperSecretPassword` |
