@@ -110,7 +110,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - assessme-db-data:/var/lib/postgresql/data
+      - assessme-db-data:/var/lib/postgresql
     ports:
       - "${DOCKER_POSTGRES_PORT:-5485}:5432"
     networks:
