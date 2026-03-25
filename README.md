@@ -25,8 +25,8 @@
     <br />
     <br />
     <a href="https://assessme.monatemedia.com">Staging</a>
-    &middot;
-    <a href="https://assessme.co.za">Production</a>
+    <!-- &middot;
+    <a href="https://assessme.co.za">Production</a> -->
     &middot;
     <a href="https://github.com/monatemedia/assessme/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     &middot;
@@ -128,7 +128,7 @@ docker-compose.yml + docker-compose.local.yml
 ├── assessme-web      Laravel 13 + Filament 5 (Apache, PHP 8.3)
 ├── assessme-queue    Queue worker — processes AI marking jobs
 ├── assessme-vite     Vite dev server — hot module replacement
-├── assessme-db       PostgreSQL 18 (postgis/postgis:18-3.6-alpine)
+├── assessme-db       PostgreSQL 18 (pgvector/pgvector:pg18-trixie)
 └── assessme-redis    Redis — queue driver and cache
 ```
 

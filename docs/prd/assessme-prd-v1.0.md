@@ -12,30 +12,37 @@
 
 ## Table of Contents
 
-1. [Overview](#1-overview)
-2. [Problem Statement](#2-problem-statement)
-3. [Goals and Non-Goals](#3-goals-and-non-goals)
-4. [User Roles](#4-user-roles)
-5. [Technology Stack](#5-technology-stack)
-6. [Architecture Overview](#6-architecture-overview)
-7. [Feature Specifications](#7-feature-specifications)
-   - 7.1 [Authentication and Access](#71-authentication-and-access)
-   - 7.2 [Examiner — Test Management](#72-examiner--test-management)
-   - 7.3 [Examiner — Candidate Management](#73-examiner--candidate-management)
-   - 7.4 [Examiner — Results and Grading](#74-examiner--results-and-grading)
-   - 7.5 [Candidate — Assessment Experience](#75-candidate--assessment-experience)
-   - 7.6 [AI Marking and Plagiarism Detection](#76-ai-marking-and-plagiarism-detection)
-   - 7.7 [Notifications](#77-notifications)
-   - 7.8 [PDF Export](#78-pdf-export)
-8. [Question Types](#8-question-types)
-9. [Time Limiting](#9-time-limiting)
-10. [Unique Candidate Links](#10-unique-candidate-links)
-11. [AI Marking — Scoring Model](#11-ai-marking--scoring-model)
-12. [Deliberate Design Decisions](#12-deliberate-design-decisions)
-13. [Phase 2 Roadmap](#13-phase-2-roadmap)
-14. [Deployment](#14-deployment)
-15. [Database Schema — High Level](#15-database-schema--high-level)
-16. [JSON Import Schema](#16-json-import-schema)
+- [Product Requirements Document](#product-requirements-document)
+  - [AssessMe — AI-Assisted Technical Screening Tool](#assessme--ai-assisted-technical-screening-tool)
+  - [Table of Contents](#table-of-contents)
+  - [1. Overview](#1-overview)
+  - [2. Problem Statement](#2-problem-statement)
+  - [3. Goals and Non-Goals](#3-goals-and-non-goals)
+    - [Goals — MVP](#goals--mvp)
+    - [Non-Goals — MVP](#non-goals--mvp)
+  - [4. User Roles](#4-user-roles)
+  - [5. Technology Stack](#5-technology-stack)
+  - [6. Architecture Overview](#6-architecture-overview)
+  - [7. Feature Specifications](#7-feature-specifications)
+    - [7.1 Authentication and Access](#71-authentication-and-access)
+    - [7.2 Examiner — Test Management](#72-examiner--test-management)
+    - [7.3 Examiner — Candidate Management](#73-examiner--candidate-management)
+    - [7.4 Examiner — Results and Grading](#74-examiner--results-and-grading)
+    - [7.5 Candidate — Assessment Experience](#75-candidate--assessment-experience)
+    - [7.6 AI Marking and Plagiarism Detection](#76-ai-marking-and-plagiarism-detection)
+    - [7.7 Notifications](#77-notifications)
+    - [7.8 PDF Export](#78-pdf-export)
+  - [8. Question Types](#8-question-types)
+    - [MVP Question Types](#mvp-question-types)
+    - [Phase 2 Question Types](#phase-2-question-types)
+  - [9. Time Limiting](#9-time-limiting)
+  - [10. Unique Candidate Links](#10-unique-candidate-links)
+  - [11. AI Marking — Scoring Model](#11-ai-marking--scoring-model)
+  - [12. Deliberate Design Decisions](#12-deliberate-design-decisions)
+  - [13. Phase 2 Roadmap](#13-phase-2-roadmap)
+  - [14. Deployment](#14-deployment)
+  - [15. Database Schema — High Level](#15-database-schema--high-level)
+  - [16. JSON Import Schema](#16-json-import-schema)
 
 ---
 
@@ -98,7 +105,7 @@ AssessMe addresses all of the above within a self-hosted, Dockerised environment
 | Backend framework | Laravel 13 | Mature, well-documented, excellent ecosystem |
 | Admin panel | Filament 5 | Rapid UI development, native code editor, multitenancy support |
 | Frontend (candidate view) | Blade + Livewire | Lightweight, server-rendered, no separate SPA needed |
-| Database | PostgreSQL 18.3 (Alpine) | Future-fit for AI extensions (pgvector for vector search), excellent JSON support, superior query planner for complex analytics |
+| Database | PostgreSQL 18 (pgvector/pgvector:pg18-trixie) | Future-fit for AI extensions (pgvector for vector search), excellent JSON support, superior query planner for complex analytics |
 | Cache and queues | Redis | Fast, reliable queue driver for background AI jobs |
 | AI marking and plagiarism | OpenAI GPT-4o | Powerful instruction-following, structured output support |
 | PDF export | Spatie Laravel PDF | Docker-friendly, no external services required |
@@ -120,7 +127,7 @@ Docker Network
     +--- app (Laravel 13 + Filament 5)
     |         Port: 8000 (internal)
     |
-    +--- postgres (PostgreSQL 18.3 Alpine)
+    +--- postgres (PostgreSQL 18 (pgvector/pgvector:pg18-trixie))
     |         Port: 5432 (internal)
     |
     +--- redis (Redis)
@@ -462,7 +469,7 @@ services:
     env_file: .env
 
   postgres:
-    image: postgres:18.3-alpine
+    image: pgvector/pgvector:pg18-trixie
     deploy:
       resources:
         limits:
