@@ -17,6 +17,7 @@ services:
     entrypoint: /usr/local/bin/docker-entrypoint.sh
     command: apache2-foreground
     environment:
+      APP_KEY: ${APP_KEY} # Passed from the host .env or shell
       APP_ENV: production
       APP_DEBUG: false
       APP_URL: ${APP_URL}
@@ -37,10 +38,8 @@ services:
     env_file:
       - .env
     volumes:
-      - ./.env:/var/www/html/.env
       - ./storage:/var/www/html/storage
       - ./bootstrap/cache:/var/www/html/bootstrap/cache
-      - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh
     deploy:
       resources:
         limits:
@@ -70,6 +69,7 @@ services:
     entrypoint: /usr/local/bin/docker-entrypoint.sh
     command: php artisan queue:work redis --verbose --tries=3 --timeout=300
     environment:
+      APP_KEY: ${APP_KEY} # Passed from the host .env or shell
       APP_ENV: production
       APP_DEBUG: false
       DB_CONNECTION: pgsql
@@ -86,10 +86,8 @@ services:
     env_file:
       - .env
     volumes:
-      - ./.env:/var/www/html/.env
       - ./storage:/var/www/html/storage
       - ./bootstrap/cache:/var/www/html/bootstrap/cache
-      - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh
     deploy:
       resources:
         limits:

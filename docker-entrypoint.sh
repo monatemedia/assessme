@@ -55,12 +55,6 @@ if [ -f "/var/www/html/public/hot" ]; then
     echo "Removed public/hot to force production asset usage."
 fi
 
-# Generate APP_KEY if not set
-if [ -z "${APP_KEY:-}" ]; then
-    echo "APP_KEY not set — generating..."
-    php artisan key:generate --force
-fi
-
 # Clear and rebuild caches
 php artisan config:clear
 php artisan route:clear
