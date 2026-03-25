@@ -47,7 +47,12 @@ until php -r "
     sleep 2
 done
 
-# --- 4. Application setup ---
+# --- 4. Run migrations ---
+echo "Running database migrations..."
+php artisan migrate --force --no-interaction
+echo "Migrations complete."
+
+# --- 5. Application setup ---
 
 # Remove Vite HMR hot file to force production assets
 if [ -f "/var/www/html/public/hot" ]; then
@@ -71,11 +76,6 @@ php artisan filament:optimize
 
 # Create storage symlink
 php artisan storage:link
-
-# --- 5. Run migrations ---
-echo "Running database migrations..."
-php artisan migrate --force --no-interaction
-echo "Migrations complete."
 
 # --- 6. Seed superuser if no users exist ---
 echo "Checking for superuser..."
