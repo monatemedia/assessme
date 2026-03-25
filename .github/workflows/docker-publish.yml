@@ -143,8 +143,8 @@ jobs:
           script: |
             mkdir -p ${{ env.WORK_DIR }}
             cd ${{ env.WORK_DIR }}
-            EXISTING_APP_KEY=$(grep '^APP_KEY=' .env 2>/dev/null || true)
 
+            # Write the .env file from scratch using the GitHub Secret
             cat << EOF > .env
             APP_NAME=AssessMe
             APP_ENV=staging
@@ -183,14 +183,7 @@ jobs:
             DOCKER_REDIS_PORT=${{ secrets.STAGING_DOCKER_REDIS_PORT }}
             EOF
 
-            if [ -n "$EXISTING_APP_KEY" ]; then
-                echo "$EXISTING_APP_KEY" >> .env
-                echo "✅ Existing APP_KEY preserved."
-            else
-                echo "APP_KEY=" >> .env
-                echo "ℹ️ APP_KEY will be generated on first boot."
-            fi
-            echo "✅ Staging .env written."
+            echo "✅ Staging .env written successfully using GitHub Secrets."
 
       - name: Set directory permissions for SCP
         uses: appleboy/ssh-action@master
@@ -399,9 +392,10 @@ jobs:
           username: ${{ env.USER }}
           key: ${{ env.SSH_KEY }}
           script: |
+            mkdir -p ${{ env.WORK_DIR }}
             cd ${{ env.WORK_DIR }}
-            EXISTING_APP_KEY=$(grep '^APP_KEY=' .env 2>/dev/null || true)
 
+            # Create the .env file exactly as defined in GitHub Secrets
             cat << EOF > .env
             APP_NAME=AssessMe
             APP_ENV=production
@@ -440,14 +434,7 @@ jobs:
             DOCKER_REDIS_PORT=${{ secrets.PRODUCTION_DOCKER_REDIS_PORT }}
             EOF
 
-            if [ -n "$EXISTING_APP_KEY" ]; then
-                echo "$EXISTING_APP_KEY" >> .env
-                echo "✅ Existing APP_KEY preserved."
-            else
-                echo "APP_KEY=" >> .env
-                echo "ℹ️ APP_KEY will be generated on first boot."
-            fi
-            echo "✅ Production .env written."
+            echo "✅ Production .env written successfully using GitHub Secrets."
 
       - name: Set directory permissions
         uses: appleboy/ssh-action@master
