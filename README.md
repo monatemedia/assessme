@@ -489,6 +489,17 @@ Before deploying, point your domain or subdomain to your VPS by adding an `A` re
 | Staging | `https://assessme.monatemedia.com` | Push to `release/*` branch |
 | Production | `https://assessme.co.za` | Push tag `v*` to `main` |
 
+Before deploying to your VPS, ensure that you have created the folders where the files will land on the remote server when the CI/CD pipeline runs.
+
+```bash
+# Create staging folder
+mkdir -p ~/assessme-staging
+
+# Create production folder
+mkdir -p ~/assessme
+
+```
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ### Required GitHub Secrets
@@ -881,6 +892,18 @@ root@...:/var/www/html# exit
 
 ## Roadmap
 
+## Roadmap
+
+- [x] Infrastructure
+  - [x] Laravel 13 + Filament 5 scaffolded
+  - [x] Docker local development stack (web, queue, Vite, PostgreSQL, Redis)
+  - [x] Auto-migrations and superuser seeder on container boot
+  - [x] Volume-mounted source code for live file editing without rebuilds
+  - [x] GitFlow branching model established (main, dev, feature/*, release/*, hotfix/*)
+  - [x] GitHub Actions CI/CD pipeline (staging on release/*, production on version tag)
+  - [x] Staging deployed to VPS behind Nginx reverse proxy with Let's Encrypt SSL
+  - [x] Cover page with dark navy theme, all CTAs pointing to Filament admin login
+  - [x] PRD committed to repository at `docs/prd/assessme-prd-v1.0.md`
 - [ ] MVP
   - [ ] Authentication (Superuser, Examiner, Candidate via UUID link)
   - [ ] Assessment creation via UI and JSON import
